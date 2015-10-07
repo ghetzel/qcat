@@ -37,14 +37,15 @@ func parseLogLevel(logLevel string) {
 func CreateClient(c *cli.Context) (*Client, error) {
     if len(c.Args()) > 0 {
         if client, err := NewClient(c.Args()[0]); err == nil {
-            client.Autodelete = c.Bool(`autodelete`)
-            client.Durable    = c.Bool(`durable`)
-            client.Exclusive  = c.Bool(`exclusive`)
-            client.Immediate  = c.Bool(`immediate`)
-            client.Mandatory  = c.Bool(`mandatory`)
-            client.ID         = c.String(`consumer`)
-            client.QueueName  = c.String(`queue`)
-            client.RoutingKey = c.String(`routing-key`)
+            client.Autodelete   = c.Bool(`autodelete`)
+            client.Durable      = c.Bool(`durable`)
+            client.Exclusive    = c.Bool(`exclusive`)
+            client.Immediate    = c.Bool(`immediate`)
+            client.Mandatory    = c.Bool(`mandatory`)
+            client.ID           = c.String(`consumer`)
+            client.QueueName    = c.String(`queue`)
+            client.ExchangeName = c.String(`exchange`)
+            client.RoutingKey   = c.String(`routing-key`)
 
             log.Debugf("Connecting to %s:%d vhost=%s queue=%s", client.Host, client.Port, client.Vhost, client.QueueName)
 
@@ -93,7 +94,14 @@ func main(){
                 cli.StringFlag{
                     Name:   `routing-key, r`,
                     Usage:  `The routing key to use when publishing messages`,
-                    Value:  DEFAULT_QUEUE_NAME,
+                },
+                cli.StringFlag{
+                    Name:   `content-type`,
+                    Usage:  `The Content-Type header to include with published messages`,
+                },
+                cli.StringFlag{
+                    Name:   `content-encoding`,
+                    Usage:  `The Content-Encoding header to include with published messages`,
                 },
                 cli.BoolFlag{
                     Name:   `durable, D`,
@@ -118,7 +126,10 @@ func main(){
             },
             Action: func(c *cli.Context) {
                 if client, err := CreateClient(c); err == nil {
-                    if err := client.Publish(os.Stdin); err != nil {
+                    if err := client.Publish(os.Stdin, MessageHeader{
+                        ContentType:     c.String(`content-type`),
+                        ContentEncoding: c.String(`content-encoding`),
+                    }); err != nil {
                         log.Fatalf("Error publishing: %v", err)
                     }
                 }else{

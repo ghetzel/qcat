@@ -35,6 +35,11 @@ type Client struct {
     uri          amqp.URI
 }
 
+type MessageHeader struct {
+    ContentType     string
+    ContentEncoding string
+}
+
 func NewClient(uri string) (*Client, error) {
     c := new(Client)
 
@@ -93,13 +98,15 @@ func (self *Client) SubscribeRaw() (<-chan amqp.Delivery, error) {
     return self.channel.Consume(self.queue.Name, self.ID, true, self.Exclusive, false, false, nil)
 }
 
-func (self *Client) Publish(reader io.Reader) error {
+func (self *Client) Publish(reader io.Reader, header MessageHeader) error {
     inScanner := bufio.NewScanner(reader)
 
     for inScanner.Scan() {
         body := inScanner.Text()
         self.channel.Publish(self.ExchangeName, self.RoutingKey, self.Mandatory, self.Immediate, amqp.Publishing{
-            Body: []byte(body[:]),
+            ContentType:     header.ContentType,
+            ContentEncoding: header.ContentEncoding,
+            Body:            []byte(body[:]),
         })
     }
 
