@@ -1,0 +1,4 @@
+/bin/amqpcat
+/gopath/pkg
+/gopath/src/github.com/ghetzel/amqpcat
+/*.log

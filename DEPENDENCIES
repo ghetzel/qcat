@@ -1,0 +1,4 @@
+github.com/codegangsta/cli
+github.com/quipo/statsd
+github.com/Sirupsen/logrus
+github.com/streadway/amqp
