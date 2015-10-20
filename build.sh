@@ -1,5 +1,5 @@
 #!/bin/bash -e
-PROJECT="amqpcat"
+PROJECT="qcat"
 ORG_PATH="github.com/ghetzel"
 REPO_PATH="${ORG_PATH}/${PROJECT}"
 

@@ -5,7 +5,7 @@ import (
     "os"
     log "github.com/Sirupsen/logrus"
     "github.com/codegangsta/cli"
-    "github.com/ghetzel/amqpcat/util"
+    "github.com/ghetzel/qcat/util"
 )
 
 const (
@@ -34,9 +34,9 @@ func parseLogLevel(logLevel string) {
     }
 }
 
-func CreateClient(c *cli.Context) (*Client, error) {
+func CreateAmqpClient(c *cli.Context) (*AmqpClient, error) {
     if len(c.Args()) > 0 {
-        if client, err := NewClient(c.Args()[0]); err == nil {
+        if client, err := NewAmqpClient(c.Args()[0]); err == nil {
             client.Autodelete   = c.Bool(`autodelete`)
             client.Durable      = c.Bool(`durable`)
             client.Exclusive    = c.Bool(`exclusive`)
@@ -62,6 +62,67 @@ func CreateClient(c *cli.Context) (*Client, error) {
     }
 }
 
+func FlagsForConsumers() []cli.Flag {
+    return []cli.Flag{
+        cli.StringFlag{
+            Name:   `consumer, C`,
+            Usage:  `The consumer name to report to the broker`,
+        },
+        cli.StringFlag{
+            Name:   `queue, Q`,
+            Usage:  `The name of the queue to bind to`,
+            Value:  DEFAULT_QUEUE_NAME,
+        },
+    }
+}
+
+func FlagsForPublishers() []cli.Flag {
+    return []cli.Flag{
+        cli.StringFlag{
+            Name:   `exchange, e`,
+            Usage:  `The name of the exchange to bind to`,
+        },
+        cli.StringFlag{
+            Name:   `routing-key, r`,
+            Usage:  `The routing key to use when publishing messages`,
+            Value:  DEFAULT_QUEUE_NAME,
+        },
+        cli.StringFlag{
+            Name:   `content-type`,
+            Usage:  `The Content-Type header to include with published messages`,
+        },
+        cli.StringFlag{
+            Name:   `content-encoding`,
+            Usage:  `The Content-Encoding header to include with published messages`,
+        },
+        cli.BoolFlag{
+            Name:   `mandatory, M`,
+            Usage:  `Messages are undeliverable when the mandatory flag is true and no queue is bound that matches the routing key`,
+        },
+        cli.BoolFlag{
+            Name:   `immediate, I`,
+            Usage:  `Messages are undeliverable when the immediate flag is true and no consumer on the matched queue is ready to accept the delivery`,
+        },
+    }
+}
+
+func FlagsCommon() []cli.Flag {
+    return []cli.Flag{
+        cli.BoolFlag{
+            Name:   `durable, D`,
+            Usage:  `Durable queues will survive server restarts and remain when there are no remaining consumers or bindings`,
+        },
+        cli.BoolFlag{
+            Name:   `autodelete, A`,
+            Usage:  `Auto-deleted queues will be automatically removed when all clients disconnect`,
+        },
+        cli.BoolFlag{
+            Name:   `exclusive, E`,
+            Usage:  `Exclusive queues are only accessible by the connection that declares them and will be deleted when the connection closes`,
+        },
+    }
+}
+
 func main(){
     app                      := cli.NewApp()
     app.Name                  = util.ApplicationName
@@ -84,48 +145,12 @@ func main(){
 
     app.Commands = []cli.Command{
         {
-            Name:   `publish`,
-            Usage:  `Connect to an AMQP message broker and submit messages read from standard input`,
-            Flags:  []cli.Flag{
-                cli.StringFlag{
-                    Name:   `exchange, e`,
-                    Usage:  `The name of the exchange to bind to`,
-                },
-                cli.StringFlag{
-                    Name:   `routing-key, r`,
-                    Usage:  `The routing key to use when publishing messages`,
-                },
-                cli.StringFlag{
-                    Name:   `content-type`,
-                    Usage:  `The Content-Type header to include with published messages`,
-                },
-                cli.StringFlag{
-                    Name:   `content-encoding`,
-                    Usage:  `The Content-Encoding header to include with published messages`,
-                },
-                cli.BoolFlag{
-                    Name:   `durable, D`,
-                    Usage:  `Durable queues will survive server restarts and remain when there are no remaining consumers or bindings`,
-                },
-                cli.BoolFlag{
-                    Name:   `autodelete, A`,
-                    Usage:  `Auto-deleted queues will be automatically removed when all clients disconnect`,
-                },
-                cli.BoolFlag{
-                    Name:   `exclusive, E`,
-                    Usage:  `Exclusive queues are only accessible by the connection that declares them and will be deleted when the connection closes`,
-                },
-                cli.BoolFlag{
-                    Name:   `mandatory, M`,
-                    Usage:  `Messages are undeliverable when the mandatory flag is true and no queue is bound that matches the routing key`,
-                },
-                cli.BoolFlag{
-                    Name:   `immediate, I`,
-                    Usage:  `Messages are undeliverable when the immediate flag is true and no consumer on the matched queue is ready to accept the delivery`,
-                },
-            },
-            Action: func(c *cli.Context) {
-                if client, err := CreateClient(c); err == nil {
+            Name:      `publish`,
+            Usage:     `Connect to an AMQP message broker and submit messages read from standard input`,
+            Flags:     append(FlagsCommon(), FlagsForPublishers()...),
+            ArgsUsage: `AMQP_URI`,
+            Action:    func(c *cli.Context) {
+                if client, err := CreateAmqpClient(c); err == nil {
                     if err := client.Publish(os.Stdin, MessageHeader{
                         ContentType:     c.String(`content-type`),
                         ContentEncoding: c.String(`content-encoding`),
@@ -137,39 +162,45 @@ func main(){
                 }
             },
         },{
-            Name:   `consume`,
-            Usage:  `Connect to an AMQP message broker and print messages to standard output`,
-            Flags:  []cli.Flag{
-                cli.StringFlag{
-                    Name:   `consumer, C`,
-                    Usage:  `The consumer name to report to the broker`,
-                },
-                cli.StringFlag{
-                    Name:   `queue, Q`,
-                    Usage:  `The name of the queue to bind to`,
-                    Value:  DEFAULT_QUEUE_NAME,
-                },
-                cli.BoolFlag{
-                    Name:   `durable, D`,
-                    Usage:  `Durable queues will survive server restarts and remain when there are no remaining consumers or bindings`,
-                },
-                cli.BoolFlag{
-                    Name:   `autodelete, A`,
-                    Usage:  `Auto-deleted queues will be automatically removed when all clients disconnect`,
-                },
-                cli.BoolFlag{
-                    Name:   `exclusive, E`,
-                    Usage:  `Exclusive queues are only accessible by the connection that declares them and will be deleted when the connection closes`,
-                },
-            },
-            Action: func(c *cli.Context) {
-                if client, err := CreateClient(c); err == nil {
+            Name:      `consume`,
+            Usage:     `Connect to an AMQP message broker and print messages to standard output`,
+            Flags:     append(FlagsCommon(), FlagsForConsumers()...),
+            ArgsUsage: `AMQP_URI`,
+            Action:    func(c *cli.Context) {
+                if client, err := CreateAmqpClient(c); err == nil {
                     if msgs, err := client.Subscribe(); err == nil {
                         for msg := range msgs {
                             fmt.Println(msg)
                         }
                     }else{
                         log.Fatalf("Error subscribing: %v", err)
+                    }
+                }else{
+                    log.Fatalf("%v", err)
+                }
+            },
+        },{
+            Name:      `serve`,
+            Usage:     `Start an HTTP server for receiving and consuming messages from an AMQP message broker`,
+            ArgsUsage: `AMQP_URI`,
+            Flags:     append([]cli.Flag{
+                cli.StringFlag{
+                    Name:   `address, a`,
+                    Usage:  `The address to listen on`,
+                    Value:  DEFAULT_LISTEN_ADDR,
+                },
+                cli.IntFlag{
+                    Name:   `port, p`,
+                    Usage:  `The port to listen on`,
+                    Value:  DEFAULT_LISTEN_PORT,
+                },
+            }, append(FlagsCommon(), append(FlagsForPublishers(), FlagsForConsumers()...)...)...),
+            Action:    func(c *cli.Context) {
+                if client, err := CreateAmqpClient(c); err == nil {
+                    server := NewHttpServer(c.String(`address`), c.Int(`port`), client)
+
+                    if err := server.Run(); err != nil {
+                        log.Fatalf("%v", err)
                     }
                 }else{
                     log.Fatalf("%v", err)

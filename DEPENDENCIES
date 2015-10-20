@@ -1,4 +1,6 @@
 github.com/codegangsta/cli
+github.com/julienschmidt/httprouter
 github.com/quipo/statsd
 github.com/Sirupsen/logrus
 github.com/streadway/amqp
+gopkg.in/unrolled/render.v1

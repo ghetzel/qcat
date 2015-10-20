@@ -9,10 +9,10 @@ import (
 
 const (
     DEFAULT_AMQP_PORT  = 5672
-    DEFAULT_QUEUE_NAME = `amqpcat`
+    DEFAULT_QUEUE_NAME = `qcat`
 )
 
-type Client struct {
+type AmqpClient struct {
     ID           string
     Host         string
     Port         int
@@ -40,8 +40,8 @@ type MessageHeader struct {
     ContentEncoding string
 }
 
-func NewClient(uri string) (*Client, error) {
-    c := new(Client)
+func NewAmqpClient(uri string) (*AmqpClient, error) {
+    c := new(AmqpClient)
 
     if u, err := amqp.ParseURI(uri); err == nil {
         c.uri       = u
@@ -58,7 +58,7 @@ func NewClient(uri string) (*Client, error) {
     }
 }
 
-func (self *Client) Close() error {
+func (self *AmqpClient) Close() error {
     if self.conn == nil {
         return fmt.Errorf("Cannot close, connection does not exist")
     }
@@ -66,7 +66,7 @@ func (self *Client) Close() error {
     return self.conn.Close()
 }
 
-func (self *Client) Connect() error {
+func (self *AmqpClient) Connect() error {
     if conn, err := amqp.Dial(self.uri.String()); err == nil {
         self.conn = conn
 
@@ -94,11 +94,11 @@ func (self *Client) Connect() error {
     return nil
 }
 
-func (self *Client) SubscribeRaw() (<-chan amqp.Delivery, error) {
+func (self *AmqpClient) SubscribeRaw() (<-chan amqp.Delivery, error) {
     return self.channel.Consume(self.queue.Name, self.ID, true, self.Exclusive, false, false, nil)
 }
 
-func (self *Client) Publish(reader io.Reader, header MessageHeader) error {
+func (self *AmqpClient) Publish(reader io.Reader, header MessageHeader) error {
     inScanner := bufio.NewScanner(reader)
 
     for inScanner.Scan() {
@@ -114,7 +114,7 @@ func (self *Client) Publish(reader io.Reader, header MessageHeader) error {
 }
 
 
-func (self *Client) Subscribe() (<-chan string, error) {
+func (self *AmqpClient) Subscribe() (<-chan string, error) {
     output := make(chan string)
 
     if msgs, err := self.SubscribeRaw(); err == nil {
