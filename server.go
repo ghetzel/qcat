@@ -5,6 +5,7 @@ import (
     "net"
     "net/http"
     "os"
+    "strconv"
     "time"
 
     "github.com/ghetzel/qcat/util"
@@ -21,6 +22,7 @@ const (
 type HttpServer struct {
     Address      string
     Port         int
+    BaseHeader   MessageHeader
 
     amqp         *AmqpClient
     renderer     *render.Render
@@ -85,10 +87,31 @@ func (self *HttpServer) loadRoutes() {
     })
 
     self.router.POST(`/api/publish`, func(w http.ResponseWriter, req *http.Request, params httprouter.Params){
-        if err := self.amqp.Publish(req.Body, MessageHeader{
-            ContentType:     req.Header.Get(`content-type`),
-            ContentEncoding: req.Header.Get(`content-encoding`),
-        }); err != nil {
+        header := self.BaseHeader
+
+        if v := req.Header.Get(`content-type`); v != `` {
+            header.ContentType = v
+        }
+
+        if v := req.Header.Get(`content-encoding`); v != `` {
+            header.ContentEncoding = v
+        }
+
+        if v := req.URL.Query().Get(`ttl`); v != `` {
+            header.Expiration = v
+        }
+
+        if v := req.URL.Query().Get(`persistent`); v == `true` {
+            header.DeliveryMode = uint8(2)
+        }
+
+        if v := req.URL.Query().Get(`priority`); v != `` {
+            if vi, err := strconv.ParseInt(v, 10, 8); err == nil {
+                header.Priority = uint8(vi)
+            }
+        }
+
+        if err := self.amqp.Publish(req.Body, header); err != nil {
             self.Respond(w, http.StatusServiceUnavailable, nil, fmt.Errorf("Error publishing: %v", err))
             return
         }

@@ -95,6 +95,14 @@ func FlagsForPublishers() []cli.Flag {
             Name:   `content-encoding`,
             Usage:  `The Content-Encoding header to include with published messages`,
         },
+        cli.IntFlag{
+            Name:   `ttl, t`,
+            Usage:  `The maximum amount of time (in milliseconds) the message will live in a queue before being automatically deleted`,
+        },
+        cli.IntFlag{
+            Name:   `priority`,
+            Usage:  `The priority level (0-9) that will be supplied with the published message`,
+        },
         cli.BoolFlag{
             Name:   `mandatory, M`,
             Usage:  `Messages are undeliverable when the mandatory flag is true and no queue is bound that matches the routing key`,
@@ -102,6 +110,10 @@ func FlagsForPublishers() []cli.Flag {
         cli.BoolFlag{
             Name:   `immediate, I`,
             Usage:  `Messages are undeliverable when the immediate flag is true and no consumer on the matched queue is ready to accept the delivery`,
+        },
+        cli.BoolFlag{
+            Name:   `persistent, P`,
+            Usage:  `Persistent messages are written to disk such that in the event of a broker crash the message is not lost`,
         },
     }
 }
@@ -121,6 +133,36 @@ func FlagsCommon() []cli.Flag {
             Usage:  `Exclusive queues are only accessible by the connection that declares them and will be deleted when the connection closes`,
         },
     }
+}
+
+func NewHeaderFromContext(c *cli.Context) MessageHeader {
+    header := MessageHeader{}
+
+    if c.IsSet(`persistent`) {
+        if c.Bool(`persistent`) {
+            header.DeliveryMode = uint8(2)
+        }else{
+            header.DeliveryMode = uint8(1)
+        }
+    }
+
+    if c.Int(`ttl`) > 0 {
+        header.Expiration = fmt.Sprintf("%d", c.Int(`ttl`))
+    }
+
+    if c.IsSet(`priority`) {
+        header.Priority = uint8(c.Int(`priority`))
+    }
+
+    if c.IsSet(`content-type`) {
+        header.ContentType = c.String(`content-type`)
+    }
+
+    if c.IsSet(`content-encoding`) {
+        header.ContentEncoding = c.String(`content-encoding`)
+    }    
+
+    return header
 }
 
 func main(){
@@ -151,10 +193,9 @@ func main(){
             ArgsUsage: `AMQP_URI`,
             Action:    func(c *cli.Context) {
                 if client, err := CreateAmqpClient(c); err == nil {
-                    if err := client.Publish(os.Stdin, MessageHeader{
-                        ContentType:     c.String(`content-type`),
-                        ContentEncoding: c.String(`content-encoding`),
-                    }); err != nil {
+                    header := NewHeaderFromContext(c)
+
+                    if err := client.Publish(os.Stdin, header); err != nil {
                         log.Fatalf("Error publishing: %v", err)
                     }
                 }else{
@@ -198,6 +239,7 @@ func main(){
             Action:    func(c *cli.Context) {
                 if client, err := CreateAmqpClient(c); err == nil {
                     server := NewHttpServer(c.String(`address`), c.Int(`port`), client)
+                    server.BaseHeader = NewHeaderFromContext(c)
 
                     if err := server.Run(); err != nil {
                         log.Fatalf("%v", err)

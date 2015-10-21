@@ -38,6 +38,17 @@ type AmqpClient struct {
 type MessageHeader struct {
     ContentType     string
     ContentEncoding string
+    DeliveryMode    uint8     // Transient (0 or 1) or Persistent (2)
+    Priority        uint8     // 0 to 9
+    Expiration      string    // message expiration spec
+
+    // CorrelationId   string    // correlation identifier
+    // ReplyTo         string    // address to to reply to (ex: RPC)
+    // MessageId       string    // message identifier
+    // Timestamp       time.Time // message timestamp
+    // Type            string    // message type name
+    // UserId          string    // creating user id - ex: "guest"
+    // AppId           string    // creating application id
 }
 
 func NewAmqpClient(uri string) (*AmqpClient, error) {
@@ -106,6 +117,9 @@ func (self *AmqpClient) Publish(reader io.Reader, header MessageHeader) error {
         self.channel.Publish(self.ExchangeName, self.RoutingKey, self.Mandatory, self.Immediate, amqp.Publishing{
             ContentType:     header.ContentType,
             ContentEncoding: header.ContentEncoding,
+            DeliveryMode:    header.DeliveryMode,
+            Priority:        header.Priority,
+            Expiration:      header.Expiration,
             Body:            []byte(body[:]),
         })
     }
