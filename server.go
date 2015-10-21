@@ -98,7 +98,12 @@ func (self *HttpServer) loadRoutes() {
         }
 
         if v := req.URL.Query().Get(`ttl`); v != `` {
-            header.Expiration = v
+            if _, err := strconv.ParseInt(v, 10, 64); err == nil {
+                header.Expiration = v
+            }else{
+                self.Respond(w, http.StatusBadRequest, nil, fmt.Errorf("Argument error: %v", err))
+                return
+            }
         }
 
         if v := req.URL.Query().Get(`persistent`); v == `true` {
@@ -108,6 +113,9 @@ func (self *HttpServer) loadRoutes() {
         if v := req.URL.Query().Get(`priority`); v != `` {
             if vi, err := strconv.ParseInt(v, 10, 8); err == nil {
                 header.Priority = uint8(vi)
+            }else{
+                self.Respond(w, http.StatusBadRequest, nil, fmt.Errorf("Argument error: %v", err))
+                return
             }
         }
 
