@@ -24,6 +24,9 @@ if [ -s DEPENDENCIES ]; then
   done
 fi
 
+# format it
+gofmt -w .
+
 # set flags
 [ "$DEBUG" == 'true' ] || GOFLAGS="-ldflags '-s'"
 
