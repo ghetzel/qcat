@@ -2,12 +2,13 @@ package qcat
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
+	"github.com/ghetzel/go-stockutil/httputil"
 	"github.com/ghetzel/go-stockutil/log"
 	"github.com/julienschmidt/httprouter"
 	"gopkg.in/unrolled/render.v1"
@@ -76,39 +77,30 @@ func (self *HttpServer) loadRoutes() {
 	self.router.POST(`/api/publish`, func(w http.ResponseWriter, req *http.Request, params httprouter.Params) {
 		header := self.BaseHeader
 
-		if v := req.Header.Get(`content-type`); v != `` {
-			header.ContentType = v
-		}
+		header.ContentType = httputil.Q(req, `content-type`)
+		header.ContentEncoding = httputil.Q(req, `content-encoding`)
+		header.Priority = int(httputil.QInt(req, `priority`))
 
-		if v := req.Header.Get(`content-encoding`); v != `` {
-			header.ContentEncoding = v
-		}
-
-		if v := req.URL.Query().Get(`ttl`); v != `` {
-			if _, err := strconv.ParseInt(v, 10, 64); err == nil {
-				header.Expiration = v
-			} else {
-				self.Respond(w, http.StatusBadRequest, nil, fmt.Errorf("Argument error: %v", err))
-				return
-			}
+		if expr := httputil.QInt(req, `ttl`); expr > 0 {
+			header.Expiration = time.Duration(expr) * time.Millisecond
 		}
 
 		if v := req.URL.Query().Get(`persistent`); v == `true` {
-			header.DeliveryMode = uint8(2)
+			header.DeliveryMode = Transient
 		}
 
-		if v := req.URL.Query().Get(`priority`); v != `` {
-			if vi, err := strconv.ParseInt(v, 10, 8); err == nil {
-				header.Priority = uint8(vi)
-			} else {
-				self.Respond(w, http.StatusBadRequest, nil, fmt.Errorf("Argument error: %v", err))
+		if httputil.QBool(req, `lines`) {
+			if err := self.amqp.PublishLines(req.Body, header); err != nil {
+				self.Respond(w, http.StatusServiceUnavailable, nil, fmt.Errorf("Error publishing: %v", err))
 				return
 			}
-		}
-
-		if err := self.amqp.Publish(req.Body, header); err != nil {
-			self.Respond(w, http.StatusServiceUnavailable, nil, fmt.Errorf("Error publishing: %v", err))
-			return
+		} else if data, err := ioutil.ReadAll(req.Body); err == nil {
+			if err := self.amqp.Publish(data, header); err != nil {
+				self.Respond(w, http.StatusServiceUnavailable, nil, fmt.Errorf("Error publishing: %v", err))
+				return
+			}
+		} else {
+			self.Respond(w, http.StatusBadRequest, nil, err)
 		}
 
 		self.Respond(w, http.StatusNoContent, nil, nil)

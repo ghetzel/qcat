@@ -1,6 +1,7 @@
 module github.com/ghetzel/qcat
 
 require (
+	github.com/PerformLine/go-performline-stdlib v0.6.17
 	github.com/ghetzel/cli v1.17.0
 	github.com/ghetzel/go-stockutil v1.5.49
 	github.com/julienschmidt/httprouter v0.0.0-20180715161854-348b672cd90d

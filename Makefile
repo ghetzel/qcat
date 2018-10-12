@@ -15,4 +15,4 @@ fmt:
 	go vet ./...
 
 build:
-	go build -i -o bin/qcat ./cmd/qcat/
+	go build -i -o bin/qcat ./cmd/qcat/*.go

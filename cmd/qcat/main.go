@@ -9,7 +9,7 @@ import (
 	"github.com/ghetzel/qcat"
 )
 
-func CreateAmqpClient(c *cli.Context) (*qcat.AmqpClient, error) {
+func createAmqpClient(c *cli.Context) (*qcat.AmqpClient, error) {
 	if len(c.Args()) > 0 {
 		if client, err := qcat.NewAmqpClient(c.Args()[0]); err == nil {
 			client.Autodelete = c.Bool(`autodelete`)
@@ -70,9 +70,9 @@ func FlagsForPublishers() []cli.Flag {
 			Name:  `content-encoding`,
 			Usage: `The Content-Encoding header to include with published messages`,
 		},
-		cli.IntFlag{
+		cli.DurationFlag{
 			Name:  `ttl, t`,
-			Usage: `The maximum amount of time (in milliseconds) the message will live in a queue before being automatically deleted`,
+			Usage: `The maximum amount of time the message will live in a queue before being automatically deleted`,
 		},
 		cli.IntFlag{
 			Name:  `priority`,
@@ -110,23 +110,23 @@ func FlagsCommon() []cli.Flag {
 	}
 }
 
-func NewHeaderFromContext(c *cli.Context) qcat.MessageHeader {
+func headerFromContext(c *cli.Context) qcat.MessageHeader {
 	header := qcat.MessageHeader{}
 
 	if c.IsSet(`persistent`) {
 		if c.Bool(`persistent`) {
-			header.DeliveryMode = uint8(2)
+			header.DeliveryMode = qcat.Persistent
 		} else {
-			header.DeliveryMode = uint8(1)
+			header.DeliveryMode = qcat.Transient
 		}
 	}
 
-	if c.Int(`ttl`) > 0 {
-		header.Expiration = fmt.Sprintf("%d", c.Int(`ttl`))
+	if c.Duration(`ttl`) > 0 {
+		header.Expiration = c.Duration(`ttl`)
 	}
 
 	if c.IsSet(`priority`) {
-		header.Priority = uint8(c.Int(`priority`))
+		header.Priority = c.Int(`priority`)
 	}
 
 	if c.IsSet(`content-type`) {
@@ -144,7 +144,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = `qcat`
 	app.Usage = `utility for publishing and consuming data from an AMQP message broker`
-	app.Version = `1.0.0`
+	app.Version = qcat.Version
 
 	app.Before = func(c *cli.Context) error {
 		log.SetLevelString(c.String(`log-level`))
@@ -167,10 +167,10 @@ func main() {
 			Flags:     append(FlagsCommon(), FlagsForPublishers()...),
 			ArgsUsage: `AMQP_URI`,
 			Action: func(c *cli.Context) {
-				if client, err := CreateAmqpClient(c); err == nil {
-					header := NewHeaderFromContext(c)
+				if client, err := createAmqpClient(c); err == nil {
+					header := headerFromContext(c)
 
-					if err := client.Publish(os.Stdin, header); err != nil {
+					if err := client.PublishLines(os.Stdin, header); err != nil {
 						log.Fatalf("Error publishing: %v", err)
 					}
 				} else {
@@ -183,10 +183,22 @@ func main() {
 			Flags:     append(FlagsCommon(), FlagsForConsumers()...),
 			ArgsUsage: `AMQP_URI`,
 			Action: func(c *cli.Context) {
-				if client, err := CreateAmqpClient(c); err == nil {
-					if msgs, err := client.Subscribe(); err == nil {
-						for msg := range msgs {
-							fmt.Println(msg)
+				if client, err := createAmqpClient(c); err == nil {
+					if err := client.Subscribe(); err == nil {
+						for {
+							select {
+							case message := <-client.Receive():
+								var line string
+
+								if err := message.Decode(&line); err == nil {
+									fmt.Println(line)
+								} else {
+									log.Fatalf("failed to decode message: %v", err)
+								}
+
+							case err := <-client.Err():
+								log.Fatal(err)
+							}
 						}
 					} else {
 						log.Fatalf("Error subscribing: %v", err)
@@ -207,9 +219,9 @@ func main() {
 				},
 			}, append(FlagsCommon(), append(FlagsForPublishers(), FlagsForConsumers()...)...)...),
 			Action: func(c *cli.Context) {
-				if client, err := CreateAmqpClient(c); err == nil {
+				if client, err := createAmqpClient(c); err == nil {
 					server := qcat.NewHttpServer(client)
-					server.BaseHeader = NewHeaderFromContext(c)
+					server.BaseHeader = headerFromContext(c)
 
 					if err := server.ListenAndServe(c.String(`address`)); err != nil {
 						log.Fatalf("%v", err)
