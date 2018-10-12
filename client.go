@@ -13,7 +13,7 @@ import (
 
 var DefaultQueueName = `qcat`
 
-type AmqpClient struct {
+type AMQP struct {
 	ID                string
 	Host              string
 	Port              int
@@ -75,8 +75,8 @@ func (self *Message) Decode(into interface{}) error {
 	}
 }
 
-func NewAmqpClient(uri string) (*AmqpClient, error) {
-	c := &AmqpClient{
+func NewAMQP(uri string) (*AMQP, error) {
+	c := &AMQP{
 		QueueName:         DefaultQueueName,
 		outchan:           make(chan *Message),
 		downstreamErrchan: make(chan *amqp.Error),
@@ -97,7 +97,7 @@ func NewAmqpClient(uri string) (*AmqpClient, error) {
 	}
 }
 
-func (self *AmqpClient) Close() error {
+func (self *AMQP) Close() error {
 	if self.conn == nil {
 		return fmt.Errorf("Cannot close, connection does not exist")
 	}
@@ -105,7 +105,7 @@ func (self *AmqpClient) Close() error {
 	return self.conn.Close()
 }
 
-func (self *AmqpClient) Connect() error {
+func (self *AMQP) Connect() error {
 	if conn, err := amqp.Dial(self.uri.String()); err == nil {
 		self.conn = conn
 
@@ -144,12 +144,12 @@ func (self *AmqpClient) Connect() error {
 	return nil
 }
 
-func (self *AmqpClient) SubscribeRaw() (<-chan amqp.Delivery, error) {
+func (self *AMQP) SubscribeRaw() (<-chan amqp.Delivery, error) {
 	return self.channel.Consume(self.queue.Name, self.ID, true, self.Exclusive, false, false, nil)
 }
 
 // Publish messages read from the given reader, separated by newlines ("\n").
-func (self *AmqpClient) PublishLines(reader io.Reader, header MessageHeader) error {
+func (self *AMQP) PublishLines(reader io.Reader, header MessageHeader) error {
 	inScanner := bufio.NewScanner(reader)
 
 	for inScanner.Scan() {
@@ -162,7 +162,7 @@ func (self *AmqpClient) PublishLines(reader io.Reader, header MessageHeader) err
 }
 
 // Publish a single message.
-func (self *AmqpClient) Publish(data []byte, header MessageHeader) error {
+func (self *AMQP) Publish(data []byte, header MessageHeader) error {
 	var deliveryMode int
 
 	switch header.DeliveryMode {
@@ -185,7 +185,7 @@ func (self *AmqpClient) Publish(data []byte, header MessageHeader) error {
 }
 
 // Receive a message from the channel.
-func (self *AmqpClient) Subscribe() error {
+func (self *AMQP) Subscribe() error {
 	if msgs, err := self.SubscribeRaw(); err == nil {
 		go func() {
 			for delivery := range msgs {
@@ -220,11 +220,11 @@ func (self *AmqpClient) Subscribe() error {
 }
 
 // Receive a single message.
-func (self *AmqpClient) Receive() <-chan *Message {
+func (self *AMQP) Receive() <-chan *Message {
 	return self.outchan
 }
 
 // Receive a single error.
-func (self *AmqpClient) Err() <-chan error {
+func (self *AMQP) Err() <-chan error {
 	return self.errchan
 }

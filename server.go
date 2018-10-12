@@ -18,12 +18,12 @@ var DefaultServerAddress = `:17684`
 
 type HttpServer struct {
 	BaseHeader MessageHeader
-	amqp       *AmqpClient
+	amqp       *AMQP
 	renderer   *render.Render
 	router     *httprouter.Router
 }
 
-func NewHttpServer(amqpClient *AmqpClient) *HttpServer {
+func NewHttpServer(amqpClient *AMQP) *HttpServer {
 	rv := &HttpServer{
 		amqp:     amqpClient,
 		renderer: render.New(),

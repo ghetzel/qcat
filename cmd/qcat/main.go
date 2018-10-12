@@ -9,9 +9,9 @@ import (
 	"github.com/ghetzel/qcat"
 )
 
-func createAmqpClient(c *cli.Context) (*qcat.AmqpClient, error) {
+func createAmqpClient(c *cli.Context) (*qcat.AMQP, error) {
 	if len(c.Args()) > 0 {
-		if client, err := qcat.NewAmqpClient(c.Args()[0]); err == nil {
+		if client, err := qcat.NewAMQP(c.Args()[0]); err == nil {
 			client.Autodelete = c.Bool(`autodelete`)
 			client.Durable = c.Bool(`durable`)
 			client.Exclusive = c.Bool(`exclusive`)
