@@ -1,16 +1,14 @@
-package main
+package qcat
 
 import (
 	"bufio"
 	"fmt"
-	"github.com/streadway/amqp"
 	"io"
+
+	"github.com/streadway/amqp"
 )
 
-const (
-	DEFAULT_AMQP_PORT  = 5672
-	DEFAULT_QUEUE_NAME = `qcat`
-)
+var DefaultQueueName = `qcat`
 
 type AmqpClient struct {
 	ID           string
@@ -22,17 +20,15 @@ type AmqpClient struct {
 	ExchangeName string
 	RoutingKey   string
 	QueueName    string
-
-	Durable    bool
-	Autodelete bool
-	Exclusive  bool
-	Mandatory  bool
-	Immediate  bool
-
-	conn    *amqp.Connection
-	channel *amqp.Channel
-	queue   amqp.Queue
-	uri     amqp.URI
+	Durable      bool
+	Autodelete   bool
+	Exclusive    bool
+	Mandatory    bool
+	Immediate    bool
+	conn         *amqp.Connection
+	channel      *amqp.Channel
+	queue        amqp.Queue
+	uri          amqp.URI
 }
 
 type MessageHeader struct {
@@ -41,14 +37,6 @@ type MessageHeader struct {
 	DeliveryMode    uint8  // Transient (0 or 1) or Persistent (2)
 	Priority        uint8  // 0 to 9
 	Expiration      string // message expiration spec
-
-	// CorrelationId   string    // correlation identifier
-	// ReplyTo         string    // address to to reply to (ex: RPC)
-	// MessageId       string    // message identifier
-	// Timestamp       time.Time // message timestamp
-	// Type            string    // message type name
-	// UserId          string    // creating user id - ex: "guest"
-	// AppId           string    // creating application id
 }
 
 func NewAmqpClient(uri string) (*AmqpClient, error) {
@@ -61,7 +49,7 @@ func NewAmqpClient(uri string) (*AmqpClient, error) {
 		c.Username = u.Username
 		c.Password = u.Password
 		c.Vhost = u.Vhost
-		c.QueueName = DEFAULT_QUEUE_NAME
+		c.QueueName = DefaultQueueName
 
 		return c, nil
 	} else {

@@ -1,4 +1,4 @@
-package main
+package qcat
 
 import (
 	"fmt"
@@ -8,47 +8,39 @@ import (
 	"strconv"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
-	"github.com/ghetzel/qcat/util"
+	"github.com/ghetzel/go-stockutil/log"
 	"github.com/julienschmidt/httprouter"
 	"gopkg.in/unrolled/render.v1"
 )
 
-const (
-	DEFAULT_LISTEN_ADDR = `0.0.0.0`
-	DEFAULT_LISTEN_PORT = 17684
-)
+var DefaultServerAddress = `:17684`
 
 type HttpServer struct {
-	Address    string
-	Port       int
 	BaseHeader MessageHeader
-
-	amqp     *AmqpClient
-	renderer *render.Render
-	router   *httprouter.Router
+	amqp       *AmqpClient
+	renderer   *render.Render
+	router     *httprouter.Router
 }
 
-func NewHttpServer(address string, port int, amqpClient *AmqpClient) *HttpServer {
+func NewHttpServer(amqpClient *AmqpClient) *HttpServer {
 	rv := &HttpServer{
-		Address:  address,
-		Port:     port,
 		amqp:     amqpClient,
 		renderer: render.New(),
 		router:   httprouter.New(),
 	}
 
-	rv.loadRoutes()
-
 	return rv
 }
 
-func (self *HttpServer) Run() error {
-	listenAddr := fmt.Sprintf("%s:%d", self.Address, self.Port)
+func (self *HttpServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	self.router.ServeHTTP(w, req)
+}
 
-	log.Infof("Starting HTTP API server at %s", listenAddr)
+func (self *HttpServer) ListenAndServe(address string) error {
+	self.loadRoutes()
+	log.Infof("Starting HTTP API server at %s", address)
 
-	if listener, err := net.Listen("tcp", listenAddr); err == nil {
+	if listener, err := net.Listen("tcp", address); err == nil {
 		if err := http.Serve(listener, self.router); err != nil {
 			return fmt.Errorf("Cannot start API server: %s", err)
 		}
@@ -64,10 +56,7 @@ func (self *HttpServer) loadRoutes() {
 		hostname, _ := os.Hostname()
 
 		self.Respond(w, http.StatusOK, map[string]interface{}{
-			`started_at`:  util.StartedAt.Format(time.RFC3339),
-			`node`:        hostname,
-			`application`: util.ApplicationName,
-			`version`:     util.ApplicationVersion,
+			`node`: hostname,
 			`amqp`: map[string]interface{}{
 				`host`:        self.amqp.Host,
 				`port`:        self.amqp.Port,
