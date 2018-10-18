@@ -145,6 +145,7 @@ func main() {
 	app.Name = `qcat`
 	app.Usage = `utility for publishing and consuming data from an AMQP message broker`
 	app.Version = qcat.Version
+	app.EnableBashCompletion = true
 
 	app.Before = func(c *cli.Context) error {
 		log.SetLevelString(c.String(`log-level`))
