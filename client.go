@@ -40,8 +40,8 @@ type AMQP struct {
 type DeliveryMode int
 
 const (
-	Transient DeliveryMode = iota
-	Persistent
+	Transient  DeliveryMode = 1
+	Persistent              = 2
 )
 
 type MessageHeader struct {
