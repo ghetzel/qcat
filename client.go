@@ -2,16 +2,21 @@ package qcat
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"os"
 	"time"
 
 	"github.com/ghetzel/go-stockutil/typeutil"
+	"github.com/ghetzel/go-stockutil/utils"
 	"github.com/streadway/amqp"
 )
 
 var DefaultQueueName = `qcat`
+var DefaultConnectTimeout = 5 * time.Second
 
 type AMQP struct {
 	ID                string
@@ -19,6 +24,9 @@ type AMQP struct {
 	Port              int
 	Username          string
 	Password          string
+	ConnectTimeout    time.Duration
+	HeartbeatInterval time.Duration
+	TLS               *tls.Config
 	Vhost             string
 	ExchangeName      string
 	RoutingKey        string
@@ -28,6 +36,10 @@ type AMQP struct {
 	Exclusive         bool
 	Mandatory         bool
 	Immediate         bool
+	AutoAck           bool
+	Prefetch          int
+	Headers           map[string]interface{}
+	ClientProperties  map[string]interface{}
 	conn              *amqp.Connection
 	channel           *amqp.Channel
 	queue             amqp.Queue
@@ -53,9 +65,42 @@ type MessageHeader struct {
 }
 
 type Message struct {
-	Timestamp time.Time
-	Header    MessageHeader
-	Body      []byte
+	Timestamp   time.Time
+	Header      MessageHeader
+	Body        []byte
+	delivery    *amqp.Delivery
+	ackRequired bool
+}
+
+func (self *Message) ShouldAck() bool {
+	return self.ackRequired
+}
+
+// Acknowledge the successful processing of a message.
+func (self *Message) Acknowledge() error {
+	if self.ShouldAck() {
+		return self.delivery.Ack(false)
+	} else {
+		return nil
+	}
+}
+
+// Reject a message, but don't requeue it.
+func (self *Message) Reject() error {
+	if self.ShouldAck() {
+		return self.delivery.Nack(false, false)
+	} else {
+		return nil
+	}
+}
+
+// Reject a message and requeue it.
+func (self *Message) Requeue() error {
+	if self.ShouldAck() {
+		return self.delivery.Nack(false, true)
+	} else {
+		return nil
+	}
 }
 
 func (self *Message) Decode(into interface{}) error {
@@ -78,6 +123,10 @@ func (self *Message) Decode(into interface{}) error {
 func NewAMQP(uri string) (*AMQP, error) {
 	c := &AMQP{
 		QueueName:         DefaultQueueName,
+		Headers:           make(map[string]interface{}),
+		AutoAck:           true,
+		ConnectTimeout:    DefaultConnectTimeout,
+		ClientProperties:  make(map[string]interface{}),
 		outchan:           make(chan *Message),
 		downstreamErrchan: make(chan *amqp.Error),
 		errchan:           make(chan error),
@@ -98,18 +147,48 @@ func NewAMQP(uri string) (*AMQP, error) {
 }
 
 func (self *AMQP) Close() error {
+	var merr error
+
 	if self.conn == nil {
 		return fmt.Errorf("Cannot close, connection does not exist")
+	} else if self.channel != nil {
+		if err := self.channel.Cancel(self.ID, false); err != nil {
+			merr = utils.AppendError(merr, err)
+		}
+
+		merr = utils.AppendError(merr, self.channel.Close())
 	}
 
-	return self.conn.Close()
+	return utils.AppendError(merr, self.conn.Close())
 }
 
 func (self *AMQP) Connect() error {
-	if conn, err := amqp.Dial(self.uri.String()); err == nil {
+	if _, ok := self.ClientProperties[`product`]; !ok {
+		self.ClientProperties[`product`] = `qcat`
+		self.ClientProperties[`version`] = Version
+	}
+
+	if _, ok := self.ClientProperties[`hostname`]; !ok {
+		if hostname, err := os.Hostname(); err == nil {
+			self.ClientProperties[`hostname`] = hostname
+		}
+	}
+
+	if conn, err := amqp.DialConfig(self.uri.String(), amqp.Config{
+		TLSClientConfig: self.TLS,
+		Properties:      amqp.Table(self.ClientProperties),
+		Heartbeat:       self.HeartbeatInterval,
+		Dial: func(network, addr string) (net.Conn, error) {
+			return net.DialTimeout(network, addr, self.ConnectTimeout)
+		},
+	}); err == nil {
 		self.conn = conn
 
 		if channel, err := self.conn.Channel(); err == nil {
+			if err := channel.Qos(self.Prefetch, 0, false); err != nil {
+				return err
+			}
+
 			self.channel = channel
 
 			// setup error notifications
@@ -123,9 +202,16 @@ func (self *AMQP) Connect() error {
 				}
 			}()
 
-			//  consumers will declare a queue
+			//  declare queue
 			if self.QueueName != `` {
-				if queue, err := self.channel.QueueDeclare(self.QueueName, self.Durable, self.Autodelete, self.Exclusive, false, nil); err == nil {
+				if queue, err := self.channel.QueueDeclare(
+					self.QueueName,
+					self.Durable,
+					self.Autodelete,
+					self.Exclusive,
+					false,
+					amqp.Table(self.Headers),
+				); err == nil {
 					self.queue = queue
 					return nil
 				} else {
@@ -145,7 +231,15 @@ func (self *AMQP) Connect() error {
 }
 
 func (self *AMQP) SubscribeRaw() (<-chan amqp.Delivery, error) {
-	return self.channel.Consume(self.queue.Name, self.ID, true, self.Exclusive, false, false, nil)
+	return self.channel.Consume(
+		self.queue.Name,
+		self.ID,
+		self.AutoAck,
+		self.Exclusive,
+		false,
+		false,
+		amqp.Table(self.Headers),
+	)
 }
 
 // Publish messages read from the given reader, separated by newlines ("\n").
@@ -172,16 +266,22 @@ func (self *AMQP) Publish(data []byte, header MessageHeader) error {
 		deliveryMode = 2
 	}
 
-	return self.channel.Publish(self.ExchangeName, self.RoutingKey, self.Mandatory, self.Immediate, amqp.Publishing{
+	pubOpts := amqp.Publishing{
 		Body:            data,
 		ContentType:     header.ContentType,
 		ContentEncoding: header.ContentEncoding,
 		DeliveryMode:    uint8(deliveryMode),
 		Priority:        uint8(header.Priority),
-		Expiration: fmt.Sprintf("%d", int(
+		Timestamp:       time.Now(),
+	}
+
+	if header.Expiration > 0 {
+		pubOpts.Expiration = fmt.Sprintf("%d", int(
 			header.Expiration.Round(time.Millisecond)/time.Millisecond,
-		)),
-	})
+		))
+	}
+
+	return self.channel.Publish(self.ExchangeName, self.RoutingKey, self.Mandatory, self.Immediate, pubOpts)
 }
 
 // Receive a message from the channel.
@@ -199,8 +299,10 @@ func (self *AMQP) Subscribe() error {
 				}
 
 				self.outchan <- &Message{
-					Timestamp: delivery.Timestamp,
-					Body:      delivery.Body,
+					delivery:    &delivery,
+					ackRequired: !self.AutoAck,
+					Timestamp:   delivery.Timestamp,
+					Body:        delivery.Body,
 					Header: MessageHeader{
 						ContentType:     delivery.ContentType,
 						ContentEncoding: delivery.ContentEncoding,

@@ -6,12 +6,14 @@ import (
 
 	"github.com/ghetzel/cli"
 	"github.com/ghetzel/go-stockutil/log"
+	"github.com/ghetzel/go-stockutil/stringutil"
 	"github.com/ghetzel/qcat"
 )
 
 func createAmqpClient(c *cli.Context) (*qcat.AMQP, error) {
 	if len(c.Args()) > 0 {
 		if client, err := qcat.NewAMQP(c.Args()[0]); err == nil {
+			client.ConnectTimeout = c.Duration(`connect-timeout`)
 			client.Autodelete = c.Bool(`autodelete`)
 			client.Durable = c.Bool(`durable`)
 			client.Exclusive = c.Bool(`exclusive`)
@@ -21,6 +23,13 @@ func createAmqpClient(c *cli.Context) (*qcat.AMQP, error) {
 			client.QueueName = c.String(`queue`)
 			client.ExchangeName = c.String(`exchange`)
 			client.RoutingKey = c.String(`routing-key`)
+			client.Prefetch = c.Int(`prefetch`)
+			client.HeartbeatInterval = c.Duration(`heartbeat`)
+
+			for _, property := range c.StringSlice(`property`) {
+				key, value := stringutil.SplitPair(property, `=`)
+				client.ClientProperties[key] = stringutil.Autotype(value)
+			}
 
 			log.Debugf("Connecting to %s:%d vhost=%s queue=%s", client.Host, client.Port, client.Vhost, client.QueueName)
 
@@ -47,6 +56,11 @@ func FlagsForConsumers() []cli.Flag {
 			Name:  `queue, Q`,
 			Usage: `The name of the queue to bind to`,
 			Value: qcat.DefaultQueueName,
+		},
+		cli.IntFlag{
+			Name:  `prefetch, p`,
+			Usage: `The number of items to prefetch from the queue`,
+			Value: 1,
 		},
 	}
 }
@@ -106,6 +120,19 @@ func FlagsCommon() []cli.Flag {
 		cli.BoolFlag{
 			Name:  `exclusive, E`,
 			Usage: `Exclusive queues are only accessible by the connection that declares them and will be deleted when the connection closes`,
+		},
+		cli.DurationFlag{
+			Name:  `heartbeat`,
+			Usage: `Specify on what interval to send heartbeat pings.`,
+		},
+		cli.StringSliceFlag{
+			Name:  `property, c`,
+			Usage: `Specify a client property to send to the server as a key=value pair.`,
+		},
+		cli.DurationFlag{
+			Name:  `connect-timeout, T`,
+			Usage: `How long to wait before timing out a connection attempt.`,
+			Value: qcat.DefaultConnectTimeout,
 		},
 	}
 }
