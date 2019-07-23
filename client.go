@@ -284,6 +284,19 @@ func (self *AMQP) Publish(data []byte, header MessageHeader) error {
 	return self.channel.Publish(self.ExchangeName, self.RoutingKey, self.Mandatory, self.Immediate, pubOpts)
 }
 
+// Publish a single message serialized as JSON.
+func (self *AMQP) PublishJSON(body interface{}, header MessageHeader) error {
+	if data, err := json.Marshal(body); err == nil {
+		if header.ContentType == `` {
+			header.ContentType = `application/json`
+		}
+
+		return self.Publish(data, header)
+	} else {
+		return fmt.Errorf("serialization error: %v", err)
+	}
+}
+
 // Receive a message from the channel.
 func (self *AMQP) Subscribe() error {
 	if msgs, err := self.SubscribeRaw(); err == nil {
