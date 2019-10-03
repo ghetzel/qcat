@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/ghetzel/cli"
 	"github.com/ghetzel/go-stockutil/log"
 	"github.com/ghetzel/go-stockutil/stringutil"
+	"github.com/ghetzel/go-stockutil/typeutil"
 	"github.com/ghetzel/qcat"
 )
 
@@ -62,6 +64,10 @@ func FlagsForConsumers() []cli.Flag {
 			Usage: `The number of items to prefetch from the queue`,
 			Value: 1,
 		},
+		cli.BoolFlag{
+			Name:  `raw`,
+			Usage: `Dump the whole recevied messsage.`,
+		},
 	}
 }
 
@@ -103,6 +109,10 @@ func FlagsForPublishers() []cli.Flag {
 		cli.BoolFlag{
 			Name:  `persistent, P`,
 			Usage: `Persistent messages are written to disk such that in the event of a broker crash the message is not lost`,
+		},
+		cli.StringSliceFlag{
+			Name:  `header, H`,
+			Usage: `A key=value pair that will be set as a message header.`,
 		},
 	}
 }
@@ -164,6 +174,16 @@ func headerFromContext(c *cli.Context) qcat.MessageHeader {
 		header.ContentEncoding = c.String(`content-encoding`)
 	}
 
+	for _, pair := range c.StringSlice(`header`) {
+		if header.Headers == nil {
+			header.Headers = make(map[string]interface{})
+		}
+
+		if k, v := stringutil.SplitPair(pair, `=`); v != `` {
+			header.Headers[k] = typeutil.Auto(v)
+		}
+	}
+
 	return header
 }
 
@@ -216,12 +236,20 @@ func main() {
 						for {
 							select {
 							case message := <-client.Receive():
-								var line string
-
-								if err := message.Decode(&line); err == nil {
-									fmt.Println(line)
+								if c.Bool(`raw`) {
+									if data, err := json.Marshal(message); err == nil {
+										fmt.Println(string(data))
+									} else {
+										log.Fatalf("malformed message: %v", err)
+									}
 								} else {
-									log.Fatalf("failed to decode message: %v", err)
+									var line string
+
+									if err := message.Decode(&line); err == nil {
+										fmt.Println(line)
+									} else {
+										log.Fatalf("failed to decode message: %v", err)
+									}
 								}
 
 							case err := <-client.Err():

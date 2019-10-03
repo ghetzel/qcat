@@ -62,6 +62,7 @@ type MessageHeader struct {
 	DeliveryMode    DeliveryMode
 	Priority        int
 	Expiration      time.Duration
+	Headers         map[string]interface{}
 }
 
 type Message struct {
@@ -273,6 +274,7 @@ func (self *AMQP) Publish(data []byte, header MessageHeader) error {
 		DeliveryMode:    uint8(deliveryMode),
 		Priority:        uint8(header.Priority),
 		Timestamp:       time.Now(),
+		Headers:         amqp.Table(header.Headers),
 	}
 
 	if header.Expiration > 0 {
@@ -321,6 +323,7 @@ func (self *AMQP) Subscribe() error {
 						ContentEncoding: delivery.ContentEncoding,
 						DeliveryMode:    deliveryMode,
 						Priority:        int(delivery.Priority),
+						Headers:         typeutil.MapNative(delivery.Headers),
 					},
 				}
 			}
