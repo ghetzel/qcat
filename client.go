@@ -38,6 +38,8 @@ type AMQP struct {
 	Immediate         bool
 	AutoAck           bool
 	Prefetch          int
+	PrefetchBytes     int
+	PrefetchGlobal    bool
 	Headers           map[string]interface{}
 	ClientProperties  map[string]interface{}
 	conn              *amqp.Connection
@@ -78,27 +80,45 @@ func (self *Message) ShouldAck() bool {
 }
 
 // Acknowledge the successful processing of a message.
-func (self *Message) Acknowledge() error {
+func (self *Message) Acknowledge(multiple ...bool) error {
+	multi := false
+
+	if len(multiple) > 0 && multiple[0] {
+		multi = true
+	}
+
 	if self.ShouldAck() {
-		return self.delivery.Ack(false)
+		return self.delivery.Ack(multi)
 	} else {
 		return nil
 	}
 }
 
 // Reject a message, but don't requeue it.
-func (self *Message) Reject() error {
+func (self *Message) Reject(multiple ...bool) error {
+	multi := false
+
+	if len(multiple) > 0 && multiple[0] {
+		multi = true
+	}
+
 	if self.ShouldAck() {
-		return self.delivery.Nack(false, false)
+		return self.delivery.Nack(multi, false)
 	} else {
 		return nil
 	}
 }
 
 // Reject a message and requeue it.
-func (self *Message) Requeue() error {
+func (self *Message) Requeue(multiple ...bool) error {
+	multi := false
+
+	if len(multiple) > 0 && multiple[0] {
+		multi = true
+	}
+
 	if self.ShouldAck() {
-		return self.delivery.Nack(false, true)
+		return self.delivery.Nack(multi, true)
 	} else {
 		return nil
 	}
@@ -186,7 +206,7 @@ func (self *AMQP) Connect() error {
 		self.conn = conn
 
 		if channel, err := self.conn.Channel(); err == nil {
-			if err := channel.Qos(self.Prefetch, 0, false); err != nil {
+			if err := channel.Qos(self.Prefetch, self.PrefetchBytes, self.PrefetchGlobal); err != nil {
 				return err
 			}
 
