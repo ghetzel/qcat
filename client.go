@@ -10,6 +10,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/ghetzel/go-stockutil/sliceutil"
+	"github.com/ghetzel/go-stockutil/stringutil"
 	"github.com/ghetzel/go-stockutil/typeutil"
 	"github.com/ghetzel/go-stockutil/utils"
 	"github.com/streadway/amqp"
@@ -49,6 +51,7 @@ type AMQP struct {
 	outchan           chan *Message
 	downstreamErrchan chan *amqp.Error
 	errchan           chan error
+	receiving         bool
 }
 
 type DeliveryMode int
@@ -59,6 +62,7 @@ const (
 )
 
 type MessageHeader struct {
+	ID              string
 	ContentType     string
 	ContentEncoding string
 	DeliveryMode    DeliveryMode
@@ -72,7 +76,37 @@ type Message struct {
 	Header      MessageHeader
 	Body        []byte
 	delivery    *amqp.Delivery
+	id          string
+	channel     *amqp.Channel
 	ackRequired bool
+}
+
+func (self *Message) ID() string {
+	if self.id == `` {
+		if self.Header.ID != `` {
+			self.id = self.Header.ID
+		}
+	}
+
+	if self.id == `` {
+		if d := self.delivery; d != nil && d.MessageId != `` {
+			self.id = d.MessageId
+		}
+	}
+
+	if self.id == `` {
+		self.id = stringutil.UUID().String()
+	}
+
+	return self.id
+}
+
+func (self *Message) DeliveryTag() uint64 {
+	if d := self.delivery; d != nil {
+		return d.DeliveryTag
+	} else {
+		return 0
+	}
 }
 
 func (self *Message) ShouldAck() bool {
@@ -81,14 +115,18 @@ func (self *Message) ShouldAck() bool {
 
 // Acknowledge the successful processing of a message.
 func (self *Message) Acknowledge(multiple ...bool) error {
-	multi := false
-
-	if len(multiple) > 0 && multiple[0] {
-		multi = true
+	if self.channel == nil {
+		return fmt.Errorf("no channel set")
 	}
 
 	if self.ShouldAck() {
-		return self.delivery.Ack(multi)
+		multi := false
+
+		if len(multiple) > 0 && multiple[0] {
+			multi = true
+		}
+
+		return self.channel.Ack(self.delivery.DeliveryTag, multi)
 	} else {
 		return nil
 	}
@@ -96,14 +134,17 @@ func (self *Message) Acknowledge(multiple ...bool) error {
 
 // Reject a message, but don't requeue it.
 func (self *Message) Reject(multiple ...bool) error {
-	multi := false
-
-	if len(multiple) > 0 && multiple[0] {
-		multi = true
+	if self.channel == nil {
+		return fmt.Errorf("no channel set")
 	}
 
 	if self.ShouldAck() {
-		return self.delivery.Nack(multi, false)
+		multi := false
+
+		if len(multiple) > 0 && multiple[0] {
+			multi = true
+		}
+		return self.channel.Nack(self.delivery.DeliveryTag, multi, false)
 	} else {
 		return nil
 	}
@@ -111,14 +152,18 @@ func (self *Message) Reject(multiple ...bool) error {
 
 // Reject a message and requeue it.
 func (self *Message) Requeue(multiple ...bool) error {
-	multi := false
-
-	if len(multiple) > 0 && multiple[0] {
-		multi = true
+	if self.channel == nil {
+		return fmt.Errorf("no channel set")
 	}
 
 	if self.ShouldAck() {
-		return self.delivery.Nack(multi, true)
+		multi := false
+
+		if len(multiple) > 0 && multiple[0] {
+			multi = true
+		}
+
+		return self.channel.Nack(self.delivery.DeliveryTag, multi, true)
 	} else {
 		return nil
 	}
@@ -175,6 +220,10 @@ func (self *AMQP) Close() error {
 	} else if self.channel != nil {
 		if err := self.channel.Cancel(self.ID, false); err != nil {
 			merr = utils.AppendError(merr, err)
+		}
+
+		for self.receiving {
+			time.Sleep(50 * time.Millisecond)
 		}
 
 		merr = utils.AppendError(merr, self.channel.Close())
@@ -295,6 +344,10 @@ func (self *AMQP) Publish(data []byte, header MessageHeader) error {
 		Priority:        uint8(header.Priority),
 		Timestamp:       time.Now(),
 		Headers:         amqp.Table(header.Headers),
+		MessageId: sliceutil.OrString(
+			header.ID,
+			stringutil.UUID().String(),
+		),
 	}
 
 	if header.Expiration > 0 {
@@ -323,6 +376,8 @@ func (self *AMQP) PublishJSON(body interface{}, header MessageHeader) error {
 func (self *AMQP) Subscribe() error {
 	if msgs, err := self.SubscribeRaw(); err == nil {
 		go func() {
+			self.receiving = true
+
 			for delivery := range msgs {
 				var deliveryMode DeliveryMode
 
@@ -335,6 +390,7 @@ func (self *AMQP) Subscribe() error {
 
 				self.outchan <- &Message{
 					delivery:    &delivery,
+					channel:     self.channel,
 					ackRequired: !self.AutoAck,
 					Timestamp:   delivery.Timestamp,
 					Body:        delivery.Body,
@@ -349,6 +405,7 @@ func (self *AMQP) Subscribe() error {
 			}
 
 			close(self.outchan)
+			self.receiving = false
 		}()
 
 		return nil
@@ -365,4 +422,19 @@ func (self *AMQP) Receive() <-chan *Message {
 // Receive a single error.
 func (self *AMQP) Err() <-chan error {
 	return self.errchan
+}
+
+// Acknowledge a message by its Delivery tag
+func (self *AMQP) Acknowledge(tag uint64) error {
+	return self.channel.Ack(tag, false)
+}
+
+// Reject a message by its Delivery tag
+func (self *AMQP) Reject(tag uint64) error {
+	return self.channel.Nack(tag, false, false)
+}
+
+// Requeue a message by its Delivery tag
+func (self *AMQP) Requeue(tag uint64) error {
+	return self.channel.Nack(tag, false, true)
 }
